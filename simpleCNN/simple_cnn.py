@@ -29,6 +29,30 @@ class CNN(nn.Module):
         return x
 
 
+class CNN2(nn.Module):
+    def __init__(self):
+        super(CNN2, self).__init__()
+        self.conv1 = nn.Conv2d(3, 6, kernel_size=4, stride=2, bias=False)
+        self.norm1 = nn.BatchNorm2d(6)
+        self.lrelu1 = nn.LeakyReLU(0.3, inplace=False)
+        self.conv2 = nn.Conv2d(6, 12, kernel_size=4, stride=2, bias=False)
+        self.norm2 = nn.BatchNorm2d(12)
+        self.lrelu2 = nn.LeakyReLU(0.3, inplace=False)
+        self.fc1 = nn.Linear(12 * 6 * 6, 512)
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(512, 256)
+        self.fc3 = nn.Linear(256, 10)
+
+    def forward(self, *input):
+        x = self.lrelu1(self.norm1(self.conv1(input[0])))
+        x = self.lrelu2(self.norm2(self.conv2(x)))
+        x = torch.flatten(x, start_dim=1)
+        x = self.dropout(F.relu(self.fc1(x)))
+        x = self.dropout(F.relu(self.fc2(x)))
+        x = self.fc3(x)
+        return x
+
+
 
 def train(network, dataset, device, save_path, epoch=4, lr=1e-4, watch_step=100):
 
@@ -110,12 +134,12 @@ CIFAR_train_loader = torch.utils.data.DataLoader(CIFAR_train_set, batch_size=Bat
 CIFAR_test_set = torchvision.datasets.CIFAR10(DATA_DIR, train=False, transform=transform, download=True)
 CIFAR_test_loader = torch.utils.data.DataLoader(CIFAR_test_set, batch_size=Batch_Size, shuffle=True, num_workers=Num_Workers)
 
-net = CNN().to(device)
+net = CNN2().to(device)
 
 if device.type == 'cuda':
     net = nn.DataParallel(net, list(range(2)))
 
-train(net, CIFAR_train_loader, device=device, save_path= Model_DIR, epoch=100, lr=0.5e-4)
+train(net, CIFAR_train_loader, device=device, save_path= Model_DIR, epoch=100, lr=1e-4)
 
 # net.load_state_dict(torch.load(os.path.join(Model_DIR, 'cifar10.pth')))
 test(net, CIFAR_test_loader)
