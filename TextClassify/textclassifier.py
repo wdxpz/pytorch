@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchtext
+import torch.nn.functional as F
 
 from TextClassify.config import TextClassifier_Config, DATA_DIR
 from TextClassify.network import Network
@@ -35,7 +36,7 @@ class TextClassifier(object):
         self.train_valid_ration = config['train_valid_ratio']
         self.lr = config['lr']
         self.embed_size = config['embed_size']
-        self.train_dataset, self.test_dataset= self._init_data()
+        self.train_dataset, self.test_dataset, self.max_sequence_len = self._init_data()
         self.vocab_size = len(self.train_dataset.get_vocab())
         self.label_size = len(self.train_dataset.get_labels())
 
@@ -47,8 +48,8 @@ class TextClassifier(object):
         net = Network(self.vocab_size, self.embed_size, self.label_size)
         net.to(self.device)
 
-        # if self.device.type == 'cuda' and self.ngpu > 1:
-        #     net = nn.DataParallel(net, list(range(self.ngpu)))
+        if self.device.type == 'cuda' and self.ngpu > 1:
+            net = nn.DataParallel(net, list(range(self.ngpu)))
 
         return net
 
@@ -57,7 +58,12 @@ class TextClassifier(object):
         train_set, test_set = torchtext.datasets.text_classification.DATASETS['AG_NEWS'](
             root=DATA_DIR, ngrams=self.ngrams, vocab=None)
 
-        return train_set,  test_set
+        maxlen = 0
+        for seq in train_set:
+            if len(seq[1])>maxlen:
+                maxlen = len(seq[1])
+
+        return train_set,  test_set, maxlen
 
     def _convert_batch(self, batch):
         labels = torch.tensor([entry[0] for entry in batch])
@@ -71,6 +77,15 @@ class TextClassifier(object):
 
         return texts, offsets, labels
 
+    def _convert_batch2(self, batch):
+        labels = torch.tensor([entry[0] for entry in batch])
+
+        texts = [F.pad(entry[1], (0, self.max_sequence_len-len(entry[1]))) for entry in batch]
+
+        texts = nn.utils.rnn.pad_sequence(texts, batch_first=True, padding_value=0)
+
+        return texts, labels
+
 
     def train(self):
         criterion = nn.CrossEntropyLoss().to(self.device)
@@ -81,9 +96,9 @@ class TextClassifier(object):
         valid_size = len(self.train_dataset) - train_size
         train_set, valid_set = torch.utils.data.random_split(self.train_dataset, [train_size,valid_size])
         train_loader = torch.utils.data.DataLoader(train_set, batch_size=self.batch_size, shuffle=True,
-                                                   num_workers=self.works, collate_fn=self._convert_batch)
+                                                   num_workers=self.works, collate_fn=self._convert_batch2)
         valid_loader = torch.utils.data.DataLoader(valid_set, batch_size=self.batch_size, shuffle=True,
-                                                 num_workers=self.works, collate_fn=self._convert_batch)
+                                                 num_workers=self.works, collate_fn=self._convert_batch2)
 
 
 
@@ -96,6 +111,7 @@ class TextClassifier(object):
 
             tsampels = 0
             for i, batch in enumerate(train_loader):
+
 
                 loss, accu, nsamples = self._train_func(batch, criterion, optimizer)
                 train_loss += loss
@@ -118,14 +134,16 @@ class TextClassifier(object):
     def _train_func(self, batch, criterion, optimizer):
         optimizer.zero_grad()
 
-        text, offsets, labels = batch[0], batch[1], batch[2]
-        text, offsets, labels = text.to(self.device), offsets.to(self.device), labels.to(self.device)
+        text, labels = batch[0], batch[1],
+        text, labels = text.to(self.device), labels.to(self.device)
 
-        logits = self.net(text, offsets)
+        logits = self.net(text, offsets=None)
         loss = criterion(logits, labels)
         loss.backward()
         optimizer.step()
 
+        if loss > 100:
+            print('huge loss')
         loss = loss.item()
         accu = (logits.argmax(dim=1) == labels).sum().item()
         nsamples = len(labels)
@@ -138,9 +156,9 @@ class TextClassifier(object):
         loss = 0.0
         accu = 0.0
         with torch.no_grad():
-            for i, (text, offsets, labels) in enumerate(dataloader):
-                text, offsets, labels = text.to(self.device), offsets.to(self.device), labels.to(self.device)
-                logits = self.net(text, offsets)
+            for i, (text, labels) in enumerate(dataloader):
+                text, labels = text.to(self.device), labels.to(self.device)
+                logits = self.net(text, offsets=None)
                 loss += criterion(logits, labels).item()
                 accu += (logits.argmax(dim=1) == labels).sum().item()
                 nsampels += len(labels)
