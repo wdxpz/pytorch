@@ -105,7 +105,7 @@ class TextClassifier(object):
         train_accu = 0
         train_loss = 0
 
-        print_step = 500
+        print_step = 1000
 
         for epoch in range(1, self.num_epochs+1):
 

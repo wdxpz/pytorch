@@ -7,9 +7,11 @@ class Network(nn.Module):
         self.vocab_size =  vocab_size
         self.embed_size = embed_size
         self.label_size = label_size
+        self.lstm_hidden_size = 64
 
         self.embed = nn.EmbeddingBag(self.vocab_size, self.embed_size, sparse=True)
-        self.fc = nn.Linear(self.embed_size, self.label_size)
+        self.lstm = nn.LSTM(self.embed_size, hidden_size=self.lstm_hidden_size, num_layers=2, dropout=0.8, bidirectional=False)
+        self.fc = nn.Linear(self.lstm_hidden_size, self.label_size)
 
         self._init_weights()
 
@@ -20,7 +22,12 @@ class Network(nn.Module):
         self.fc.bias.data.fill_(0.0)
 
     def forward(self, text, offsets):
-        x = self.fc(self.embed(text, offsets))
+        x = self.embed(text, offsets)
+        x = x.reshape(-1, 1, self.embed_size)
+        self.lstm.flatten_parameters()
+        x, _ = self.lstm(x)
+        x = x.reshape(-1, self.lstm_hidden_size)
+        x = self.fc(x)
         return x
 
 
